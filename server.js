@@ -41,6 +41,6 @@ app.post("/audio", (req, res) => {
 // ============================
 // 🚀 START SERVER
 // ============================
-app.listen(3000, "0.0.0.0", () => {
+app.listen(3001, "0.0.0.0", () => {
   console.log("🚀 yt-dlp backend running on port 3000");
 });
