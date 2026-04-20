@@ -1,6 +1,8 @@
 const express = require("express");
 const cors = require("cors");
-const { exec } = require("child_process");
+const { spawn } = require("child_process");
+const path = require("path");
+const fs = require("fs");
 
 const app = express();
 
@@ -11,90 +13,59 @@ app.use(express.json());
 // HEALTH
 // ============================
 app.get("/", (req, res) => {
-  res.json({ ok: true, status: "running" });
+  res.json({ ok: true, message: "Audio API running" });
 });
 
 // ============================
-// VIDEO ID
+// DOWNLOAD + STREAM AUDIO
 // ============================
-function getVideoId(url) {
-  const match = url.match(/(youtu\.be\/|v=|shorts\/)([^&?/]+)/);
-  return match ? match[2] : null;
-}
+app.post("/audio", (req, res) => {
+  const { url } = req.body;
 
-// ============================
-// RUN YT-DLP (ROBUST)
-// ============================
-function runYtDlp(url) {
-  return new Promise((resolve, reject) => {
-    const cmd = `
-yt-dlp \
--f "bestaudio/best" \
---no-playlist \
---geo-bypass \
---force-ipv4 \
---cookies cookies.txt \
---extractor-args "youtube:player_client=android,web" \
---user-agent "Mozilla/5.0" \
---socket-timeout 10 \
--g "${url}"
-`;
+  if (!url) return res.status(400).json({ error: "Missing URL" });
 
-    exec(cmd, { timeout: 30000 }, (err, stdout, stderr) => {
-      if (err) {
-        return reject(stderr || err.message);
-      }
+  const fileId = Date.now();
+  const output = `/tmp/${fileId}.mp3`;
 
-      const result = stdout.trim();
+  const yt = spawn("yt-dlp", [
+    "-f", "bestaudio",
+    "--no-playlist",
+    "--extract-audio",
+    "--audio-format", "mp3",
+    "-o", output,
+    url
+  ]);
 
-      if (!result) {
-        return reject("No audio URL found");
-      }
+  yt.on("close", (code) => {
+    if (code !== 0) {
+      return res.status(500).json({ error: "download_failed" });
+    }
 
-      resolve(result);
-    });
+    // return streaming URL
+    const audioUrl = `/stream/${fileId}`;
+    res.json({ ok: true, audioUrl });
   });
-}
+});
 
 // ============================
-// AUDIO API
+// STREAM AUDIO FILE
 // ============================
-app.post("/audio", async (req, res) => {
-  try {
-    const { url } = req.body;
+app.get("/stream/:id", (req, res) => {
+  const filePath = `/tmp/${req.params.id}.mp3`;
 
-    if (!url) {
-      return res.status(400).json({ error: "Missing URL" });
-    }
-
-    const videoId = getVideoId(url);
-
-    if (!videoId) {
-      return res.status(400).json({ error: "Invalid URL" });
-    }
-
-    // 🔥 try yt-dlp
-    const audioUrl = await runYtDlp(url);
-
-    return res.json({
-      ok: true,
-      source: "yt-dlp",
-      audioUrl,
-    });
-
-  } catch (err) {
-    console.error("YT-DLP ERROR:", err);
-
-    return res.status(500).json({
-      error: "internal_error",
-      details: err.toString(),
-    });
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).send("Not found");
   }
+
+  res.setHeader("Content-Type", "audio/mpeg");
+
+  const stream = fs.createReadStream(filePath);
+  stream.pipe(res);
 });
 
 // ============================
 // START
 // ============================
 app.listen(3001, "0.0.0.0", () => {
-  console.log("🚀 Production YouTube API running on 3001");
+  console.log("🚀 Audio server running on 3001");
 });
