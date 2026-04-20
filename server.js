@@ -4,31 +4,21 @@ const { exec } = require("child_process");
 const fs = require("fs");
 
 const app = express();
-
 app.use(cors());
 app.use(express.json());
 
 const CACHE = "./cache";
 if (!fs.existsSync(CACHE)) fs.mkdirSync(CACHE);
 
-// =====================
-// HEALTH
-// =====================
 app.get("/", (req, res) => {
-  res.json({ ok: true, message: "YouTube to MP3 API running" });
+  res.json({ ok: true });
 });
 
-// =====================
-// VIDEO ID
-// =====================
 function getId(url) {
   const m = url.match(/(youtu\.be\/|v=|shorts\/)([^&?/]+)/);
   return m ? m[2] : null;
 }
 
-// =====================
-// MAIN CONVERT
-// =====================
 app.post("/audio", (req, res) => {
   const { url } = req.body;
 
@@ -37,10 +27,9 @@ app.post("/audio", (req, res) => {
   const id = getId(url);
   if (!id) return res.status(400).json({ error: "invalid url" });
 
-  const output = `${CACHE}/${id}.mp3`;
+  const file = `${CACHE}/${id}.mp3`;
 
-  // cache
-  if (fs.existsSync(output)) {
+  if (fs.existsSync(file)) {
     return res.json({
       ok: true,
       cached: true,
@@ -48,21 +37,25 @@ app.post("/audio", (req, res) => {
     });
   }
 
-  // download audio ONLY
   const cmd = `
-yt-dlp -f bestaudio \
---extract-audio \
---audio-format mp3 \
+yt-dlp \
+-f "bestaudio" \
 --no-playlist \
 --geo-bypass \
--o "${output}" \
+--cookies cookies.txt \
+--extractor-args "youtube:player_client=android" \
+--user-agent "Mozilla/5.0" \
+--add-header "referer:https://www.youtube.com/" \
+--extract-audio \
+--audio-format mp3 \
+-o "${file}" \
 "${url}"
 `;
 
   exec(cmd, { maxBuffer: 1024 * 1024 * 50 }, (err) => {
     if (err) {
       return res.status(500).json({
-        error: "download_failed",
+        error: "yt-dlp_failed",
         details: err.message,
       });
     }
@@ -75,9 +68,8 @@ yt-dlp -f bestaudio \
   });
 });
 
-// serve files
-app.use("/cache", express.static("cache"));
+app.use("/cache", express.static(CACHE));
 
 app.listen(3001, "0.0.0.0", () => {
-  console.log("🚀 YouTube MP3 API running on 3001");
+  console.log("🚀 working youtube audio API");
 });
