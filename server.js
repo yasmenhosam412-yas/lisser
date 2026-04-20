@@ -1,8 +1,6 @@
 const express = require("express");
 const cors = require("cors");
-const { spawn } = require("child_process");
-const path = require("path");
-const fs = require("fs");
+const { exec } = require("child_process");
 
 const app = express();
 
@@ -10,62 +8,54 @@ app.use(cors());
 app.use(express.json());
 
 // ============================
-// HEALTH
+// 🏠 HEALTH CHECK
 // ============================
 app.get("/", (req, res) => {
-  res.json({ ok: true, message: "Audio API running" });
+  res.send("YT-DLP API is running 🚀");
 });
 
 // ============================
-// DOWNLOAD + STREAM AUDIO
+// 🎧 AUDIO ENDPOINT
 // ============================
 app.post("/audio", (req, res) => {
   const { url } = req.body;
 
-  if (!url) return res.status(400).json({ error: "Missing URL" });
+  if (!url) {
+    return res.status(400).json({ error: "Missing URL" });
+  }
 
-  const fileId = Date.now();
-  const output = `/tmp/${fileId}.mp3`;
+  // ✅ FIXED yt-dlp command (stable for YouTube 2026)
+  const command = `yt-dlp -f "bestaudio/best" --extractor-args "youtube:player_client=android" -g "${url}"`;
 
-  const yt = spawn("yt-dlp", [
-    "-f", "bestaudio",
-    "--no-playlist",
-    "--extract-audio",
-    "--audio-format", "mp3",
-    "-o", output,
-    url
-  ]);
-
-  yt.on("close", (code) => {
-    if (code !== 0) {
-      return res.status(500).json({ error: "download_failed" });
+  exec(command, { timeout: 20000 }, (err, stdout, stderr) => {
+    if (err) {
+      console.error("yt-dlp error:", stderr || err.message);
+      return res.status(500).json({
+        error: "yt-dlp failed",
+        details: stderr?.toString() || err.message,
+      });
     }
 
-    // return streaming URL
-    const audioUrl = `/stream/${fileId}`;
-    res.json({ ok: true, audioUrl });
+    const audioUrl = stdout.trim();
+
+    if (!audioUrl) {
+      return res.status(500).json({
+        error: "No audio URL found",
+      });
+    }
+
+    return res.json({
+      audioUrl,
+      ok: true,
+    });
   });
 });
 
 // ============================
-// STREAM AUDIO FILE
+// 🚀 START SERVER
 // ============================
-app.get("/stream/:id", (req, res) => {
-  const filePath = `/tmp/${req.params.id}.mp3`;
+const PORT = 3001;
 
-  if (!fs.existsSync(filePath)) {
-    return res.status(404).send("Not found");
-  }
-
-  res.setHeader("Content-Type", "audio/mpeg");
-
-  const stream = fs.createReadStream(filePath);
-  stream.pipe(res);
-});
-
-// ============================
-// START
-// ============================
-app.listen(3001, "0.0.0.0", () => {
-  console.log("🚀 Audio server running on 3001");
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 yt-dlp backend running on port ${PORT}`);
 });
