@@ -23,25 +23,33 @@ function getVideoId(url) {
 }
 
 // ============================
-// YT-DLP CORE (FIXED)
+// RUN YT-DLP (ROBUST)
 // ============================
 function runYtDlp(url) {
   return new Promise((resolve, reject) => {
     const cmd = `
 yt-dlp \
--f "bestaudio" \
+-f "bestaudio/best" \
 --no-playlist \
 --geo-bypass \
---extractor-args "youtube:player_client=android" \
+--force-ipv4 \
+--cookies cookies.txt \
+--extractor-args "youtube:player_client=android,web" \
 --user-agent "Mozilla/5.0" \
+--socket-timeout 10 \
 -g "${url}"
 `;
 
     exec(cmd, { timeout: 30000 }, (err, stdout, stderr) => {
-      if (err) return reject(stderr || err.message);
+      if (err) {
+        return reject(stderr || err.message);
+      }
 
       const result = stdout.trim();
-      if (!result) return reject("No audio found");
+
+      if (!result) {
+        return reject("No audio URL found");
+      }
 
       resolve(result);
     });
@@ -49,7 +57,7 @@ yt-dlp \
 }
 
 // ============================
-// AUDIO ENDPOINT
+// AUDIO API
 // ============================
 app.post("/audio", async (req, res) => {
   try {
@@ -65,16 +73,17 @@ app.post("/audio", async (req, res) => {
       return res.status(400).json({ error: "Invalid URL" });
     }
 
+    // 🔥 try yt-dlp
     const audioUrl = await runYtDlp(url);
 
     return res.json({
       ok: true,
+      source: "yt-dlp",
       audioUrl,
-      source: "yt-dlp"
     });
 
   } catch (err) {
-    console.error(err);
+    console.error("YT-DLP ERROR:", err);
 
     return res.status(500).json({
       error: "internal_error",
@@ -87,5 +96,5 @@ app.post("/audio", async (req, res) => {
 // START
 // ============================
 app.listen(3001, "0.0.0.0", () => {
-  console.log("🚀 Stable YouTube API running on 3001");
+  console.log("🚀 Production YouTube API running on 3001");
 });
