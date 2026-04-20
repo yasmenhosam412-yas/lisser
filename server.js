@@ -7,16 +7,16 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ============================
-// 🏠 HEALTH CHECK
-// ============================
+// ======================
+// HEALTH
+// ======================
 app.get("/", (req, res) => {
-  res.send("YT-DLP API is running 🚀");
+  res.json({ ok: true });
 });
 
-// ============================
-// 🎧 AUDIO ENDPOINT
-// ============================
+// ======================
+// AUDIO
+// ======================
 app.post("/audio", (req, res) => {
   const { url } = req.body;
 
@@ -24,15 +24,19 @@ app.post("/audio", (req, res) => {
     return res.status(400).json({ error: "Missing URL" });
   }
 
-  // ✅ FIXED yt-dlp command (stable for YouTube 2026)
-  const command = `yt-dlp -f "bestaudio/best" --extractor-args "youtube:player_client=android" -g "${url}"`;
+  // 🔥 lightweight & stable command
+  const cmd = `yt-dlp -f ba \
+--no-playlist \
+--geo-bypass \
+--user-agent "Mozilla/5.0" \
+--extractor-args "youtube:player_client=android" \
+--get-url "${url}"`;
 
-  exec(command, { timeout: 20000 }, (err, stdout, stderr) => {
+  exec(cmd, { timeout: 25000 }, (err, stdout, stderr) => {
     if (err) {
-      console.error("yt-dlp error:", stderr || err.message);
       return res.status(500).json({
-        error: "yt-dlp failed",
-        details: stderr?.toString() || err.message,
+        error: "yt-dlp_failed",
+        details: stderr?.toString() || err.message
       });
     }
 
@@ -40,22 +44,17 @@ app.post("/audio", (req, res) => {
 
     if (!audioUrl) {
       return res.status(500).json({
-        error: "No audio URL found",
+        error: "no_audio_found"
       });
     }
 
     return res.json({
-      audioUrl,
       ok: true,
+      audioUrl
     });
   });
 });
 
-// ============================
-// 🚀 START SERVER
-// ============================
-const PORT = 3001;
-
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 yt-dlp backend running on port ${PORT}`);
+app.listen(3001, "0.0.0.0", () => {
+  console.log("🚀 Light YouTube API running");
 });
