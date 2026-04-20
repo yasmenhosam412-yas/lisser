@@ -11,78 +11,31 @@ app.use(express.json());
 // 🏠 HEALTH CHECK
 // ============================
 app.get("/", (req, res) => {
-  res.send("🚀 Production YouTube Gateway API Running");
+  res.json({
+    status: "ok",
+    message: "🚀 Stable YouTube Gateway API Running",
+  });
 });
 
-// ============================
-// 🧠 SIMPLE CACHE (RAM)
-// ============================
-const cache = new Map();
-const CACHE_TTL = 1000 * 60 * 30; // 30 min
-
-function setCache(key, value) {
-  cache.set(key, {
-    value,
-    expire: Date.now() + CACHE_TTL,
-  });
-}
-
-function getCache(key) {
-  const data = cache.get(key);
-  if (!data) return null;
-
-  if (Date.now() > data.expire) {
-    cache.delete(key);
-    return null;
-  }
-
-  return data.value;
-}
+app.get("/health", (req, res) => {
+  res.json({ status: "ok" });
+});
 
 // ============================
 // 🔧 extract video id
 // ============================
 function getVideoId(url) {
-  const match = url.match(/(youtu\.be\/|v=|shorts\/)([^&?/]+)/);
-  return match ? match[2] : null;
+  if (!url) return null;
+
+  const match = url.match(
+    /(?:youtu\.be\/|youtube\.com.*v=|youtube\.com\/shorts\/)([^&?/]+)/
+  );
+
+  return match ? match[1] : null;
 }
 
 // ============================
-// 🌐 Invidious Instances (Fallback)
-// ============================
-const INSTANCES = [
-  "https://yewtu.be",
-  "https://invidious.projectsegfau.lt",
-  "https://vid.puffyan.us",
-  "https://invidious.privacydev.net"
-];
-
-// ============================
-// 🔥 FETCH FROM INSTANCES
-// ============================
-async function fetchFromInstances(videoId) {
-  for (const base of INSTANCES) {
-    try {
-      const url = `${base}/api/v1/videos/${videoId}`;
-
-      const res = await axios.get(url, {
-        timeout: 5000,
-      });
-
-      if (res.data && res.data.formatStreams) {
-        return res.data;
-      }
-    } catch (err) {
-      // try next instance
-      continue;
-    }
-  }
-
-  return null;
-}
-
-// ============================
-// 🎧 AUDIO ENDPOINT (PRODUCTION)
+// 🎧 AUDIO ENDPOINT (STABLE)
 // ============================
 app.post("/audio", async (req, res) => {
   try {
@@ -99,28 +52,15 @@ app.post("/audio", async (req, res) => {
     }
 
     // ============================
-    // ⚡ CACHE CHECK
+    // 🔥 Invidious fallback API
     // ============================
-    const cached = getCache(videoId);
-    if (cached) {
-      return res.json({
-        ...cached,
-        cached: true,
-      });
-    }
+    const apiUrl = `https://yewtu.be/api/v1/videos/${videoId}`;
 
-    // ============================
-    // 🔥 FETCH DATA
-    // ============================
-    const data = await fetchFromInstances(videoId);
+    const response = await axios.get(apiUrl, {
+      timeout: 10000,
+    });
 
-    if (!data) {
-      return res.status(500).json({
-        error: "All instances failed",
-      });
-    }
-
-    const formats = data.formatStreams || [];
+    const formats = response.data?.formatStreams || [];
 
     if (!formats.length) {
       return res.status(404).json({
@@ -128,32 +68,28 @@ app.post("/audio", async (req, res) => {
       });
     }
 
-    // ============================
-    // 🎯 PICK BEST AUDIO
-    // ============================
+    // 🎯 pick best audio or fallback
     const audio =
-      formats.find(f => f.mimeType.includes("audio")) ||
-      formats[formats.length - 1];
+      formats.find((f) => f.mimeType?.includes("audio")) ||
+      formats[0];
 
-    const result = {
-      audioUrl: audio.url,
-      title: data.title,
-      duration: data.lengthSeconds,
+    if (!audio?.url) {
+      return res.status(500).json({
+        error: "No valid audio url",
+      });
+    }
+
+    return res.json({
       ok: true,
-    };
-
-    // ============================
-    // 💾 SAVE CACHE
-    // ============================
-    setCache(videoId, result);
-
-    return res.json(result);
-
+      videoId,
+      title: response.data.title,
+      audioUrl: audio.url,
+    });
   } catch (err) {
-    console.error("ERROR:", err.message);
+    console.error("API ERROR:", err.message);
 
     return res.status(500).json({
-      error: "server_error",
+      error: "internal_error",
       details: err.message,
     });
   }
@@ -162,8 +98,8 @@ app.post("/audio", async (req, res) => {
 // ============================
 // 🚀 START SERVER
 // ============================
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log("🚀 Production YouTube API running on port", PORT);
+  console.log(`🚀 Production YouTube API running on port ${PORT}`);
 });
