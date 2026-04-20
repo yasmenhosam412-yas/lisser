@@ -1,30 +1,29 @@
 const express = require("express");
 const cors = require("cors");
-const axios = require("axios");
+const { Innertube } = require("youtubei.js");
 
 const app = express();
-
 app.use(cors());
 app.use(express.json());
 
-// ============================
+// =========================
 // HEALTH
-// ============================
+// =========================
 app.get("/", (req, res) => {
-  res.json({ ok: true, message: "Simple YouTube Audio API 🚀" });
+  res.json({ ok: true, message: "YouTube Audio API (youtubei.js) 🚀" });
 });
 
-// ============================
-// GET VIDEO ID
-// ============================
+// =========================
+// VIDEO ID
+// =========================
 function getVideoId(url) {
   const match = url.match(/(youtu\.be\/|v=|shorts\/)([^&?/]+)/);
   return match ? match[2] : null;
 }
 
-// ============================
-// AUDIO ENDPOINT
-// ============================
+// =========================
+// AUDIO API
+// =========================
 app.post("/audio", async (req, res) => {
   try {
     const { url } = req.body;
@@ -39,26 +38,24 @@ app.post("/audio", async (req, res) => {
       return res.status(400).json({ error: "invalid_url" });
     }
 
-    // ============================
-    // 🔥 PIPED API (stable fallback)
-    // ============================
-    const api = `https://pipedapi.kavin.rocks/streams/${videoId}`;
+    const youtube = await Innertube.create();
 
-    const response = await axios.get(api, { timeout: 10000 });
+    const video = await youtube.getInfo(videoId);
 
-    const audioStreams = response.data?.audioStreams;
+    const formats = video.streaming_data?.adaptive_formats || [];
 
-    if (!audioStreams || audioStreams.length === 0) {
+    const audio = formats
+      .filter(f => f.mime_type.includes("audio"))
+      .sort((a, b) => b.bitrate - a.bitrate)[0];
+
+    if (!audio) {
       return res.status(404).json({ error: "no_audio_found" });
     }
 
-    // أعلى جودة
-    const bestAudio = audioStreams[0];
-
     return res.json({
       ok: true,
-      audioUrl: bestAudio.url,
-      title: response.data.title,
+      audioUrl: audio.url,
+      title: video.basic_info?.title,
     });
 
   } catch (err) {
@@ -69,7 +66,7 @@ app.post("/audio", async (req, res) => {
   }
 });
 
-// ============================
+// =========================
 app.listen(3001, "0.0.0.0", () => {
-  console.log("🚀 Simple Audio API running on 3001");
+  console.log("🚀 youtubei.js API running");
 });
