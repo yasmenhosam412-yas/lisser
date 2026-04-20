@@ -3,15 +3,28 @@ const cors = require("cors");
 const axios = require("axios");
 
 const app = express();
+
 app.use(cors());
 app.use(express.json());
 
-// Extract video ID
+// ============================
+// 🏠 HEALTH CHECK
+// ============================
+app.get("/", (req, res) => {
+  res.send("🚀 Stable YouTube Gateway API Running");
+});
+
+// ============================
+// 🔧 extract video id
+// ============================
 function getVideoId(url) {
   const match = url.match(/(youtu\.be\/|v=)([^&]+)/);
   return match ? match[2] : null;
 }
 
+// ============================
+// 🎧 AUDIO ENDPOINT (STABLE)
+// ============================
 app.post("/audio", async (req, res) => {
   try {
     const { url } = req.body;
@@ -26,26 +39,35 @@ app.post("/audio", async (req, res) => {
       return res.status(400).json({ error: "Invalid YouTube URL" });
     }
 
-    // Invidious API
-    const response = await axios.get(
-      `https://yewtu.be/api/v1/videos/${videoId}`
-    );
+    // ============================
+    // 🔥 PRIMARY SOURCE (Invidious)
+    // ============================
+    const apiUrl = `https://yewtu.be/api/v1/videos/${videoId}`;
 
-    const formats = response.data.formatStreams;
+    const response = await axios.get(apiUrl, {
+      timeout: 10000,
+    });
 
-    if (!formats || formats.length === 0) {
+    const formats = response.data?.formatStreams || [];
+
+    if (!formats.length) {
       return res.status(404).json({ error: "No streams found" });
     }
 
-    // نختار audio-only أو best available
-    const audio = formats.find(f => f.mimeType.includes("audio")) || formats[0];
+    // 🎯 pick best audio OR fallback
+    const audio =
+      formats.find(f => f.mimeType.includes("audio")) ||
+      formats[0];
 
     return res.json({
       audioUrl: audio.url,
+      title: response.data.title,
       ok: true,
     });
 
   } catch (err) {
+    console.error(err.message);
+
     return res.status(500).json({
       error: "failed",
       details: err.message,
@@ -53,6 +75,11 @@ app.post("/audio", async (req, res) => {
   }
 });
 
-app.listen(3001, () => {
-  console.log("🚀 Stable YouTube API running");
+// ============================
+// 🚀 START SERVER
+// ============================
+const PORT = 3001;
+
+app.listen(PORT, "0.0.0.0", () => {
+  console.log("🚀 Production YouTube API running on port", PORT);
 });
