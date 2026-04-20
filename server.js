@@ -25,7 +25,7 @@ app.post("/audio", (req, res) => {
   }
 
   // ✅ FIXED yt-dlp command (stable for YouTube 2026)
-  const command = `yt-dlp -f "bestaudio/best" --extractor-args "youtube:player_client=android" -g "${url}"`;
+  const command = `yt-dlp -f "bestaudio/best" --cookies cookies.txt -g "${url}"`;
 
   exec(command, { timeout: 20000 }, (err, stdout, stderr) => {
     if (err) {
