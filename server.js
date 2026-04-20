@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const { exec } = require("child_process");
 const axios = require("axios");
 
 const app = express();
@@ -17,25 +18,75 @@ app.get("/", (req, res) => {
   });
 });
 
-app.get("/health", (req, res) => {
-  res.json({ status: "ok" });
-});
-
 // ============================
 // 🔧 extract video id
 // ============================
 function getVideoId(url) {
-  if (!url) return null;
-
-  const match = url.match(
-    /(?:youtu\.be\/|youtube\.com.*v=|youtube\.com\/shorts\/)([^&?/]+)/
-  );
-
-  return match ? match[1] : null;
+  const match = url.match(/(youtu\.be\/|v=|shorts\/)([^&?/]+)/);
+  return match ? match[2] : null;
 }
 
 // ============================
-// 🎧 AUDIO ENDPOINT (STABLE)
+// ⚡ yt-dlp method (PRIMARY)
+// ============================
+function getAudioFromYtDlp(url) {
+  return new Promise((resolve, reject) => {
+    const cmd = `
+      yt-dlp -f "bestaudio" \
+      --no-playlist \
+      --geo-bypass \
+      -g "${url}"
+    `;
+
+    exec(cmd, { timeout: 20000 }, (err, stdout, stderr) => {
+      if (err) return reject(err);
+      const result = stdout.trim();
+      if (!result) return reject(new Error("No yt-dlp result"));
+      resolve(result);
+    });
+  });
+}
+
+// ============================
+// 🌐 fallback (Invidious)
+// ============================
+async function getAudioFromInvidious(videoId) {
+  const instances = [
+    "https://yewtu.be",
+    "https://inv.nadeko.net",
+    "https://invidious.io.lol"
+  ];
+
+  for (const base of instances) {
+    try {
+      const url = `${base}/api/v1/videos/${videoId}`;
+
+      const res = await axios.get(url, { timeout: 10000 });
+
+      const formats = res.data?.adaptiveFormats || res.data?.formatStreams;
+
+      if (!formats) continue;
+
+      const audio =
+        formats.find(f => f.mimeType?.includes("audio")) ||
+        formats[0];
+
+      if (audio?.url) {
+        return {
+          audioUrl: audio.url,
+          title: res.data.title,
+        };
+      }
+    } catch (e) {
+      continue;
+    }
+  }
+
+  throw new Error("All Invidious instances failed");
+}
+
+// ============================
+// 🎧 AUDIO ENDPOINT (PRODUCTION)
 // ============================
 app.post("/audio", async (req, res) => {
   try {
@@ -52,41 +103,33 @@ app.post("/audio", async (req, res) => {
     }
 
     // ============================
-    // 🔥 Invidious fallback API
+    // 1️⃣ Try yt-dlp FIRST
     // ============================
-    const apiUrl = `https://yewtu.be/api/v1/videos/${videoId}`;
+    try {
+      const audioUrl = await getAudioFromYtDlp(url);
 
-    const response = await axios.get(apiUrl, {
-      timeout: 10000,
-    });
-
-    const formats = response.data?.formatStreams || [];
-
-    if (!formats.length) {
-      return res.status(404).json({
-        error: "No streams found",
+      return res.json({
+        ok: true,
+        source: "yt-dlp",
+        audioUrl,
       });
+    } catch (e) {
+      console.log("yt-dlp failed → fallback");
     }
 
-    // 🎯 pick best audio or fallback
-    const audio =
-      formats.find((f) => f.mimeType?.includes("audio")) ||
-      formats[0];
-
-    if (!audio?.url) {
-      return res.status(500).json({
-        error: "No valid audio url",
-      });
-    }
+    // ============================
+    // 2️⃣ fallback Invidious
+    // ============================
+    const fallback = await getAudioFromInvidious(videoId);
 
     return res.json({
       ok: true,
-      videoId,
-      title: response.data.title,
-      audioUrl: audio.url,
+      source: "invidious",
+      ...fallback,
     });
+
   } catch (err) {
-    console.error("API ERROR:", err.message);
+    console.error(err);
 
     return res.status(500).json({
       error: "internal_error",
@@ -98,8 +141,8 @@ app.post("/audio", async (req, res) => {
 // ============================
 // 🚀 START SERVER
 // ============================
-const PORT = process.env.PORT || 3001;
+const PORT = 3001;
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 Production YouTube API running on port ${PORT}`);
+  console.log("🚀 Production YouTube API running on port", PORT);
 });
