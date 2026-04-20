@@ -2,100 +2,82 @@ const express = require("express");
 const cors = require("cors");
 const { exec } = require("child_process");
 const fs = require("fs");
-const path = require("path");
 
 const app = express();
+
 app.use(cors());
 app.use(express.json());
 
-const CACHE_DIR = "./cache";
-if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR);
+const CACHE = "./cache";
+if (!fs.existsSync(CACHE)) fs.mkdirSync(CACHE);
 
-// ======================
+// =====================
 // HEALTH
-// ======================
+// =====================
 app.get("/", (req, res) => {
-  res.json({ ok: true, status: "running" });
+  res.json({ ok: true, message: "YouTube to MP3 API running" });
 });
 
-// ======================
+// =====================
 // VIDEO ID
-// ======================
-function getVideoId(url) {
-  const match = url.match(/(youtu\.be\/|v=|shorts\/)([^&?/]+)/);
-  return match ? match[2] : null;
+// =====================
+function getId(url) {
+  const m = url.match(/(youtu\.be\/|v=|shorts\/)([^&?/]+)/);
+  return m ? m[2] : null;
 }
 
-// ======================
-// CACHE CHECK
-// ======================
-function getCachePath(id) {
-  return path.join(CACHE_DIR, `${id}.mp3`);
-}
+// =====================
+// MAIN CONVERT
+// =====================
+app.post("/audio", (req, res) => {
+  const { url } = req.body;
 
-// ======================
-// DOWNLOAD AUDIO (STABLE)
-// ======================
-function downloadAudio(url, outputPath) {
-  return new Promise((resolve, reject) => {
-    const cmd = `
-ffmpeg -y -i "$(yt-dlp -f bestaudio -g ${url})" 
--acodec libmp3lame -b:a 128k ${outputPath}
+  if (!url) return res.status(400).json({ error: "missing url" });
+
+  const id = getId(url);
+  if (!id) return res.status(400).json({ error: "invalid url" });
+
+  const output = `${CACHE}/${id}.mp3`;
+
+  // cache
+  if (fs.existsSync(output)) {
+    return res.json({
+      ok: true,
+      cached: true,
+      url: `/cache/${id}.mp3`,
+    });
+  }
+
+  // download audio ONLY
+  const cmd = `
+yt-dlp -f bestaudio \
+--extract-audio \
+--audio-format mp3 \
+--no-playlist \
+--geo-bypass \
+-o "${output}" \
+"${url}"
 `;
 
-    exec(cmd, { maxBuffer: 1024 * 1024 * 10 }, (err) => {
-      if (err) return reject(err);
-      resolve(outputPath);
-    });
-  });
-}
-
-// ======================
-// AUDIO ENDPOINT
-// ======================
-app.post("/audio", async (req, res) => {
-  try {
-    const { url } = req.body;
-
-    if (!url) return res.status(400).json({ error: "Missing URL" });
-
-    const videoId = getVideoId(url);
-    if (!videoId) return res.status(400).json({ error: "Invalid URL" });
-
-    const cachedFile = getCachePath(videoId);
-
-    // 🔥 CACHE HIT
-    if (fs.existsSync(cachedFile)) {
-      return res.json({
-        ok: true,
-        cached: true,
-        audioUrl: `/cache/${videoId}.mp3`,
+  exec(cmd, { maxBuffer: 1024 * 1024 * 50 }, (err) => {
+    if (err) {
+      return res.status(500).json({
+        error: "download_failed",
+        details: err.message,
       });
     }
 
-    // 🔥 DOWNLOAD ONCE
-    await downloadAudio(url, cachedFile);
-
-    return res.json({
+    res.json({
       ok: true,
       cached: false,
-      audioUrl: `/cache/${videoId}.mp3`,
+      url: `/cache/${id}.mp3`,
     });
-
-  } catch (err) {
-    return res.status(500).json({
-      error: "failed",
-      details: err.message,
-    });
-  }
+  });
 });
 
-// ======================
-// SERVE CACHE
-// ======================
-app.use("/cache", express.static(CACHE_DIR));
+// serve files
+app.use("/cache", express.static("cache"));
 
-// ======================
 app.listen(3001, "0.0.0.0", () => {
-  console.log("🚀 Stable Audio Cache API running");
+  console.log("🚀 YouTube MP3 API running on 3001");
 });
