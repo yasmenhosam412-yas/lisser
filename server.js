@@ -1,20 +1,30 @@
 const express = require("express");
 const cors = require("cors");
-const { Innertube } = require("youtubei.js");
+const { exec } = require("child_process");
+const fs = require("fs");
+const path = require("path");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 // =========================
+// CACHE DIR
+// =========================
+const CACHE_DIR = path.join(__dirname, "cache");
+if (!fs.existsSync(CACHE_DIR)) {
+  fs.mkdirSync(CACHE_DIR);
+}
+
+// =========================
 // HEALTH
 // =========================
 app.get("/", (req, res) => {
-  res.json({ ok: true, message: "YouTube Audio API (youtubei.js) 🚀" });
+  res.json({ ok: true, message: "Audio Backend Running 🚀" });
 });
 
 // =========================
-// VIDEO ID
+// GET VIDEO ID
 // =========================
 function getVideoId(url) {
   const match = url.match(/(youtu\.be\/|v=|shorts\/)([^&?/]+)/);
@@ -22,7 +32,39 @@ function getVideoId(url) {
 }
 
 // =========================
-// AUDIO API
+// MAIN CONVERT FUNCTION
+// =========================
+function convertToAudio(url, videoId) {
+  return new Promise((resolve, reject) => {
+    const output = path.join(CACHE_DIR, `${videoId}.mp3`);
+
+    // CACHE HIT
+    if (fs.existsSync(output)) {
+      return resolve(output);
+    }
+
+    const cmd = `
+yt-dlp \
+-f bestaudio \
+--extract-audio \
+--audio-format mp3 \
+--audio-quality 128K \
+--no-playlist \
+--geo-bypass \
+--cookies cookies.txt \
+-o "${output}" \
+"${url}"
+`;
+
+    exec(cmd, { timeout: 120000 }, (err) => {
+      if (err) return reject(err);
+      resolve(output);
+    });
+  });
+}
+
+// =========================
+// API
 // =========================
 app.post("/audio", async (req, res) => {
   try {
@@ -38,35 +80,35 @@ app.post("/audio", async (req, res) => {
       return res.status(400).json({ error: "invalid_url" });
     }
 
-    const youtube = await Innertube.create();
-
-    const video = await youtube.getInfo(videoId);
-
-    const formats = video.streaming_data?.adaptive_formats || [];
-
-    const audio = formats
-      .filter(f => f.mime_type.includes("audio"))
-      .sort((a, b) => b.bitrate - a.bitrate)[0];
-
-    if (!audio) {
-      return res.status(404).json({ error: "no_audio_found" });
-    }
+    const filePath = await convertToAudio(url, videoId);
 
     return res.json({
       ok: true,
-      audioUrl: audio.url,
-      title: video.basic_info?.title,
+      audioUrl: `/file/${videoId}`,
     });
 
   } catch (err) {
     return res.status(500).json({
-      error: "failed",
+      error: "download_failed",
       details: err.message,
     });
   }
 });
 
 // =========================
+// SERVE FILES
+// =========================
+app.get("/file/:id", (req, res) => {
+  const file = path.join(CACHE_DIR, `${req.params.id}.mp3`);
+
+  if (!fs.existsSync(file)) {
+    return res.status(404).json({ error: "not_found" });
+  }
+
+  res.sendFile(file);
+});
+
+// =========================
 app.listen(3001, "0.0.0.0", () => {
-  console.log("🚀 youtubei.js API running");
+  console.log("🚀 Audio backend running on port 3001");
 });
